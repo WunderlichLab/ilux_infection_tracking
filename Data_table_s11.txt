@@ -1,0 +1,14 @@
+Hour	Well	Fly1	Fly2	Fly3	Fly4	Fly5	Fly6	Fly7	Fly8	Fly9	Fly10	Fly11	Fly12	
+7	G	F	T	F	F	F	F	F	F	F	F	F	F	
+7.5	G	F	T	F	F	F	F	F	F	F	F	F	F	
+8	G	T	T	T	T	T	T	T	T	T	T	T	T	
+8.5	G	T	T	T	T	T	T	T	T	T	T	T	T	
+9	G	T	T	T	T	T	T	T	T	T	T	T	T	
+9.5	G	T	T	T	T	T	T	T	T	T	T	T	T	
+10	G	T	T	T	T	T	T	T	T	T	T	T	T	
+10.5	G	T	T	T	T	T	T	T	T	T	T	T	T	
+11	G	T	T	T	T	T	T	T	T	T	T	T	T	
+11.5	G	T	T	T	T	T	T	T	T	T	T	T	T	
+														
+														
+														
