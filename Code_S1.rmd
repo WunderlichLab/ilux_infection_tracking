@@ -1,0 +1,1583 @@
+---
+title: 'BLI Data'
+author: "Bryan Ramirez-Corona"
+date: "03/30/2022"
+output: html_document
+---
+
+# Summary
+The purpose of this script is to look at the Flux data generated for the collaboration between Wunderlich lab and the Prescher Lab . 
+
+# Libraries
+```{r}
+suppressMessages(library(ggplot2))
+library(data.table)
+library(plyr)
+suppressMessages(library(dplyr))
+suppressMessages(library(tidyverse))
+suppressMessages(library(TSclust))
+library(lmodel2)
+library(ggh4x)
+
+setwd("~/Desktop/Wunderlichlab/BLI/Files_for_submission/Supplement/") ##change as necessary
+```
+
+## Determining ilux CFUs/µl at OD1
+#### Figure S1
+```{r}
+dpdata<-read.table("Data_table_s1.txt", header = T)
+
+#Working with Mean CFUs across replicates ( just the SPot Measurements)
+dpdata$cfumean <-rowMeans(dpdata[,8:13])
+#CFUs/µl for spot measurements are calculated as (mean CFUs * Dilution factor) / Plated volume
+dpdata$preCFUpul<-(dpdata$cfumean*dpdata$DF)/dpdata$CFUvolume
+
+dpdata$Plate<-as.numeric(as.character(dpdata$Plate))
+#CFUs/µl for plate measurements are calculated as (mean CFUs * Dilution factor) / Plarted volume
+dpdata$plateCFUpul<-(dpdata$Plate*dpdata$DF)/dpdata$PlateVolume
+
+## add date to the DF
+temp1<-dpdata[,c("Date","preCFUpul")]
+temp1$Treatment<-"preCFUpul"
+colnames(temp1)[2]<-"CFUµl"
+temp2<-dpdata[,c("Date","plateCFUpul")]
+temp2$Treatment<-"plateCFUpul"
+colnames(temp2)[2]<-"CFUµl"
+dpdatamelt<-rbind(temp1,temp2)
+
+dpdatamelt<-dpdatamelt[is.na(dpdatamelt$CFUµl)==FALSE & dpdatamelt$CFUµl != 0 ,]
+testmeans <- aggregate(CFUµl ~  Treatment, dpdatamelt, mean)
+paste0("Average CFUs/µl atr OD 1 (Plate counts) : ", testmeans[1,2])
+paste0("Average CFUs/µl atr OD 1 (Spot counts) : ", testmeans[2,2])
+paste0("Average CFUs/µl atr OD 1 (Combined Measurements) : ",mean(testmeans$CFUµl))
+
+FIG_S1<-ggplot(data = dpdatamelt, aes(x=`Treatment`,y=`CFUµl`))
+
+FIG_S1 +
+  geom_boxplot() +
+  ylab("CFUs/µl")+
+  ggtitle("Supplemental Figure 1\nCalculated CFUs/µl OD600 = 1 ")+
+  #scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  geom_jitter(size = 5,shape=16, position=position_jitter(0.2))+
+  stat_summary(fun.y=mean, geom="point", shape=20, size=5, color="red", fill="red")+
+  geom_text(data = testmeans, aes(label = CFUµl, y = CFUµl + 0.08))+
+  scale_x_discrete(labels=c("preCFUpul" = "Spot Measurment\n5µl", "plateCFUpul" = "Plate Measurment\n90µl"))
+```
+
+## characterizing the relationship between radiance and CFUs
+### Looking in liquid culture
+#### Figure 2A
+```{r}
+ex1_data<-read.table("Data_table_s2.txt", header = T)
+#lets get the data into a workable format: 
+ex1_data_re<-gather(ex1_data, "cfu", "radiance", X301840491:X47)
+c_r<-as.data.frame(t(as.data.frame(strsplit(ex1_data_re$cfu,"X"))))
+ex1_data_re<-cbind(ex1_data_re, c_r$V2)
+##rename our cfus per µl column
+colnames(ex1_data_re)[5]<-"cfupµl"
+rownames(ex1_data_re)<-seq(1,nrow(ex1_data_re),1)
+#we should also probably do a flux/cfu huh
+ex1_data_re$t_CFU<-as.numeric(as.character(ex1_data_re$cfupµl))
+ex1_data_re$RpCFU<-(as.numeric(as.character(ex1_data_re$radiance)))/ex1_data_re$t_CF
+##remove NA
+ex1_data_re<-ex1_data_re[complete.cases(ex1_data_re),]
+ex1_data_re$log_t_CFU<-log(ex1_data_re$t_CFU)
+mean_rpcfu<-mean(ex1_data_re[ex1_data_re$t_CFU>=3600,colnames(ex1_data_re)=="RpCFU"])
+ex1_data_re$log_radiance<-log(ex1_data_re$radiance )
+
+ax_breaks<-c(1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000)
+ax_labeles<-c("1","10","100",expression("10"^3),expression("10"^4),expression("10"^5),expression("10"^6),expression("10"^7),expression("10"^8),expression("10"^9))
+
+ex1_data_sub<-ex1_data_re[ex1_data_re$t_CFU>=1000 & ex1_data_re$radiance >=1000,]
+
+ggplot_regression<-lmodel2(ex1_data_sub$log_radiance~ex1_data_sub$log_t_CFU, data=ex1_data_sub ,nperm = 2)
+
+colorcodes<-c("#070504","#070504","#070504","#070504","#070504","#070504","#F58B80","#C6AE2E","#30B44A","#2BBFC7","#81ABDA","#D988BA")
+
+ex1_data_re$cfu<-as.factor(ex1_data_re$cfu)
+levels(ex1_data_re$cfu)<-c("0.00003","0.00000375","0.00006","0.0006","0.006","0.6","6","0.06","0.0000075","9.375E-07","0.000015","0.000001875")
+ex1_data_re$cfu<-ordered(ex1_data_re$cfu, levels=c("9.375E-07","0.000001875","0.00000375","0.0000075","0.000015","0.00003","0.00006","0.0006","0.006","0.06","0.6","6"))
+
+f2a<-c("0.00003","0.00006","0.0006","0.006","0.06","0.6","6")
+f2acolors<-c("#070504","#F58B80","#C6AE2E","#30B44A","#2BBFC7","#81ABDA","#D988BA")
+
+FIG2A<-ggplot(data = ex1_data_re[ex1_data_re$cfu %in% f2a , ], aes(x=`cfu` ,y=`radiance`, color=`cfu`)) 
+##save at 3.5 x 3.5
+FIG2A +
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 5, alpha = .5) +
+  ylab("total flux\n (p/s)")+
+  xlab("OD")+
+  #geom_abline(slope = f2areg$coef[[2]], intercept = f2areg$coef[[1]])+
+  ggtitle("Figure2A\ntotal fluxvs OD in liquid culture")+
+  scale_color_manual(values = f2acolors)+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10, angle = 90), axis.text.y = element_text(size= 10),
+        legend.position = "none")
+
+```
+
+### looking in injected flies 
+
+#### Figure S3
+
+```{r}
+leastdilute<-function(fulldata){
+  tempmatrix<-data.frame(matrix(ncol = length(fulldata), nrow = 0))
+  for ( i in 1:length(unique(fulldata$Fly))){
+    tempdata<-fulldata[fulldata$Fly==i,]
+    tempdata<-tempdata[1,]
+    tempmatrix<-rbind(tempmatrix,tempdata)
+    rm(tempdata)
+  }
+  return(tempmatrix)
+}
+
+#males and females
+ex3b_dp<-read.table("Data_table_s3.txt", header = T)
+ex3b_dp<-ex3b_dp[complete.cases(ex3b_dp),]
+ex3b_flux<-read.table("Data_table_s4.txt", header = T)
+
+ex3b_dp$cfupfly<-rowMeans(ex3b_dp[,c("A","B","C")], na.rm = TRUE)*ex3b_dp$DF*250
+
+ex3b_hidp<-leastdilute(ex3b_dp)
+ex3b_complete<-merge(ex3b_flux, ex3b_hidp, all=T, by.x=6, by.y=7 )
+ex3b_complete$log_Flux<-log(ex3b_complete$Flux)
+ex3b_complete$log_cfupfly<-log(ex3b_complete$cfupfly)
+ex3b_complete<-ex3b_complete[ex3b_complete$log_cfupfly!="-Inf",]
+ex3b_female<-ex3b_complete[ex3b_complete$Sex.x=="f",]
+
+freg<-lmodel2(ex3b_female$Flux~ex3b_female$cfupfly , data=ex3b_female , nperm = 99)
+freglog<-lmodel2(ex3b_female$log_Flux~ex3b_female$log_cfupfly , data=ex3b_female , nperm = 99)
+
+ex3b_male<-ex3b_complete[ex3b_complete$Sex.x=="m",]
+mreg<-lmodel2(ex3b_male$Flux~ex3b_male$cfupfly , data=ex3b_male , nperm = 99)
+mreglog<-lmodel2(ex3b_male$log_Flux~ex3b_male$log_cfupfly , data=ex3b_male, nperm = 99 )
+
+m_CI<-abs(mreglog[[3]][3,3]-mreglog[[4]][3,4])
+paste("male slope CI +/- ",m_CI)
+f_CI<-abs(freglog[[3]][3,3]-freglog[[4]][3,4])
+paste("female slope CI +/- ",m_CI)
+
+FIG_S3<-ggplot(data = ex3b_complete, aes(x=`cfupfly` ,y=`Flux`, color=`Sex.y`))
+FIG_S3+
+  annotate("rect", xmin = 0, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 5, alpha = .5)+
+  ylab("total flux\n (p/s)")+
+  xlab("CFUs/fly")+
+  ggtitle("Supplemental Figure 3\nTotal total flux vs Total CFUs ")+
+  geom_abline(slope = mreglog[[3]][3,3], intercept = mreglog[[3]][3,2], color="#00BFC4" )+
+  geom_abline(slope = freglog[[3]][3,3], intercept = freglog[[3]][3,2], color="#F8766D")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw() +
+  scale_color_discrete(name="sex")+
+  annotate("text", x=100000, y=40000000, label= paste("Male: y=",signif(mreglog[[3]][3,3],2),"x",signif(mreglog[[3]][3,2],2)))+
+annotate("text", x=1500, y=40000000, label= paste("Female: y=",signif(freglog[[3]][3,3],2),"x+",signif(freglog[[3]][3,2],2)))
+```
+#### Figure 2B
+```{r}
+#all males
+ex3a_dp<-read.table("Data_table_s5.txt", header = T)
+ex3a_dp<-ex3a_dp[complete.cases(ex3a_dp),]
+ex3a_flux<-read.table("Data_table_s6.txt", header = T)
+#first we calculate the predicted CFUs/fly
+ex3a_dp$cfupfly<-rowMeans(ex3a_dp[,c("A","B","C")], na.rm = TRUE)*ex3a_dp$DF*250
+##for now lets just pull out the least diluted calculation.
+ex3a_hidp<-leastdilute(ex3a_dp)
+ex3a_complete<-merge(ex3a_flux, ex3a_hidp, all=T, by.x=1, by.y=5 )
+ex3a_complete$log_Flux<-log(ex3a_complete$Flux)
+ex3a_complete$log_cfupfly<-log(ex3a_complete$cfupfly)
+ggplot_regression3<-lmodel2(ex3a_complete$log_Flux~ex3a_complete$log_cfupfly , data=ex3a_complete , nperm = 99)
+regression_3b<-lmodel2(Flux~cfupfly , data=ex3a_complete, nperm = 99 )
+#Combining data for a mega regression 
+temp_3a<-ex3a_complete[,c("Fly", "OD.x", "Flux", "cfupfly")]
+temp_3a$Date<-20210301
+temp_3b<-ex3b_complete[,c("Fly", "OD.x", "Flux", "cfupfly")]
+temp_3b$Date<-20210402
+ex3_mega<-rbind(temp_3a,temp_3b)
+mega_regression<-lmodel2(log(Flux)~log(cfupfly) , data=ex3_mega , nperm = 99)
+
+paste("y=",mega_regression[[3]][3,3],"x+",mega_regression[[3]][3,2])
+mega_CI<-abs(mega_regression[[3]][3,3]-mega_regression[[4]][3,4])
+paste(" slope CI +/- ",mega_CI)
+
+colorcodes<-c("#30B44A","#2BBFC7","#81ABDA","#D988BA")
+FIG2B<-ggplot(data = ex3_mega, aes(x=`cfupfly` ,y=`Flux`, color=as.factor(`OD.x`)))
+#save pdf 4.5x3.5
+FIG2B+
+  geom_point(size = 4, alpha = .5)+
+  ylab("total flux\n (p/s)")+
+  xlab("CFUs/fly")+
+  labs(col="OD")+
+  ggtitle("Figure2B\ntotal fluxvs CFUs/fly ")+
+  scale_color_manual(values = colorcodes)+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw() +
+  #geom_abline(slope = mega_regression[[3]][3,3], intercept = mega_regression[[3]][3,2])+
+  #annotate("text", x=10000, y=100000000, label= paste("y=",signif(mega_regression[[3]][3,3],2),"x + ",signif(mega_regression[[3]][3,2],2)))+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10),
+        legend.text=element_text(size=10),
+        legend.title=element_text(size=10))
+
+
+
+```
+
+## Looking at our ability to distinguish/track infections over time
+#### Figure 3b
+
+```{r}
+ex4_data<-read.table("Data_table_s7.txt", header = T)
+
+
+
+ex4_data_re<-gather(ex4_data, "FlyID", "radiance", Fly1:Fly12)
+ex4_data_re<-ex4_data_re[complete.cases(ex4_data_re),]
+ex4_data_re$ID<-paste(ex4_data_re$experiment,ex4_data_re$FlyID, sep="")
+
+fig3b<-ex4_data_re[ex4_data_re$experiment=="b",]
+#Filter out lowest 2 ODs
+fig3b<-fig3b[fig3b$p_CFU>70,]
+fig3b$OD<-as.factor(fig3b$p_CFU)
+levels(fig3b$OD)<-c( "0.006","0.06","0.6","6")
+
+colorcodes3b<-c("#00BA38","#00BFC4","#619CFF","#F564E3")
+
+
+FIG3B<-ggplot(data = fig3b, aes(x=`Day`,y=`radiance`, colour=as.factor(`OD`)))
+##save pdf 4 x 3.5
+FIG3B +
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 2, alpha = .5, position=position_jitter(0.1)) +
+  ylab("total flux\n (p/s)")+
+  xlab("day")+
+  ggtitle("Figure3B\n")+
+  geom_smooth()+
+  labs(col="OD")+
+  scale_color_manual(values = colorcodes3b)+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10),
+        legend.text=element_text(size=10),legend.title=element_text(size=10))
+```
+
+### Figure 3c
+
+```{r}
+fig3c<-fig3b
+colorcodes3c<-c("#00BA38","#00BFC4","#619CFF","#F564E3")
+
+FIG3C<-ggplot(data = fig3c, aes(x=`Day`,y=`radiance`, colour=`OD`, group=`ID`))
+#Individual tracks
+FIG3C +
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 1, alpha = .5) +
+  ggtitle("Figure 3C")+
+  ylab("total flux\n (p/s)")+
+  xlab("day")+
+  facet_wrap(. ~ OD,ncol=4)+
+  geom_path()+
+  stat_smooth(aes(group = 1), color="black", size=.5,linetype="dashed")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  scale_colour_manual(values=colorcodes3c)+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10),
+        legend.position="none", panel.grid.minor = element_blank())
+```
+
+#### Figure s6
+```{r}
+ex2b_data<-read.table("Data_table_s8.txt", header = T)
+ex2c_data<-read.table("Data_table_s9.txt", header = T)
+ex2d_data<-read.table("Data_table_s16.txt", header = T)
+
+ex2b_data$ex<-"B"
+ex2b_data$plost<-ex2b_data$negative/ex2b_data$Counts
+ex2b_data<-ex2b_data[is.nan(ex2b_data$plost)==F,]
+#filter out day1 df 100 ( its too dense) 
+ex2b_data<-ex2b_data[!(ex2b_data$day==1 & ex2b_data$Dilution==100),]
+ex2b_datafilt<-ex2b_data[ex2b_data$Counts >= 30, ]
+#try3 data processing 
+ex2c_data$ex<-"C"
+ex2c_data$plost<-ex2c_data$negative/ex2c_data$Counts
+ex2b_data<-ex2b_data[is.nan(ex2b_data$plost)==F,]
+#try4 data processing 
+ex2d_data$ex<-"D"
+ex2d_data$plost<-ex2d_data$negative/ex2d_data$Counts
+ex2d_data<-ex2d_data[complete.cases(ex2d_data),]
+ex2d_data<-ex2d_data[ex2d_data$Counts >= 30, ]
+ex2d_data_filt<-ex2d_data[, c("date","Genotype", "Condition","Hour","Counts", "ilux","negative","ex","plost")]
+
+##cobineB and C data
+ex2_dataFULL<-rbind(ex2b_datafilt, ex2c_data)
+ex2_dataFULL<-ex2_dataFULL[, c("date","Genotype", "Condition","Hour","Counts", "ilux","negative","ex","plost")]
+ex2_dataFULL<-rbind(ex2_dataFULL, ex2d_data_filt)
+ex2_dataFULL$Treatment<-paste0(ex2_dataFULL$Genotype, ex2_dataFULL$Condition)
+
+testmeansamp <- aggregate(plost ~  Hour, ex2_dataFULL[ex2_dataFULL$Condition=="AMP",], mean)
+testmeansamp$Condition<-"AMP"
+testmeans <- aggregate(plost ~  Hour, ex2_dataFULL[ex2_dataFULL$Condition=="STANDARD",], mean)
+testmeans$Condition<-"STANDARD"
+testmeans<-rbind(testmeansamp,testmeans)
+testmeans$plost<-round(testmeans$plost,digits = 2)
+
+FIG_S6A<-ggplot(data = ex2_dataFULL, aes(x=as.factor(`Hour`) ,y=`plost`, fill=`Condition`))
+#5x3
+#7x3v2
+FIG_S6A+ 
+  geom_boxplot() +
+  theme_bw() + 
+  labs(title="Supplemental Figure 6A\nPlasmid loss over time",
+       x="hour",
+       y= "proportion of colonies\nplasmid lost",
+       caption = "Boxplot shows data median, red dot shows mean value")+
+  scale_fill_manual(name="Condition", values = c("gray","gray"), guide="none")+
+  geom_point(position=position_jitterdodge(jitter.width=0, dodge.width = .7, seed = 1234), size = 2, shape=16, alpha = .6, aes(color=Condition))+
+  geom_text(data = testmeans[testmeans$Condition=="AMP",],
+            size = 2.5, nudge_x = -.2 ,
+            aes(label = plost, y = plost+0.02))+
+  geom_text(data = testmeans[testmeans$Condition=="STANDARD",], 
+            size = 2.5, nudge_x = .2 ,
+            aes(label = plost, y = plost+0.02))+
+  geom_point(data = testmeans[testmeans$Condition=="AMP",],color= 'red', size = 2, shape=16, aes(y=`plost`, x=as.factor(`Hour`)))+
+   geom_point(data = testmeans[testmeans$Condition=="STANDARD",],color= 'red', size = 2, shape=16, aes(y=`plost`, x=as.factor(`Hour`)))+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10),
+        legend.text=element_text(size=10),
+        legend.title=element_text(size=10))
+
+totmeansamp <- aggregate(negative ~  Hour, ex2_dataFULL[ex2_dataFULL$Condition=="AMP",], mean)
+totmeansamp$Condition<-"AMP"
+totmeans <- aggregate(negative ~  Hour, ex2_dataFULL[ex2_dataFULL$Condition=="STANDARD",], mean)
+totmeans$Condition<-"STANDARD"
+totmeans<-rbind(totmeansamp,totmeans)
+totmeans$negative<-round(totmeans$negative,digits = 2)
+
+FIG_S6B<-ggplot(data = ex2_dataFULL, aes(x=as.factor(`Hour`) ,y=`negative`, fill = `Condition`))
+FIG_S6B+ 
+  geom_boxplot()+ 
+  xlab("hour")+
+  ylab("total of colonies\nplasmid lost")+
+  ggtitle("Supplemental Figure 6B\nPlasmid loss over time") +
+  theme_bw() + 
+  scale_fill_manual(name="Condition", values = c("gray","gray"), guide="none")+
+  geom_point(position=position_jitterdodge(jitter.width=0, dodge.width = .7, seed = 1234), size = 2,shape=16, alpha = .6, aes(color=Condition))+
+    geom_text(data = totmeans[totmeans$Condition=="AMP",],
+            size = 2.5, nudge_x = -.2 ,
+            aes(label = negative, y = negative+1.5))+
+  geom_text(data = totmeans[totmeans$Condition=="STANDARD",], 
+            size = 2.5, nudge_x = .2 ,
+            aes(label = negative, y = negative+1.5))+
+  geom_point(data = totmeans[totmeans$Condition=="AMP",],color= 'red', size = 2, shape=16, aes(y=`negative`, x=as.factor(`Hour`)))+
+   geom_point(data = totmeans[totmeans$Condition=="STANDARD",],color= 'red', size = 2, shape=16, aes(y=`negative`, x=as.factor(`Hour`)))+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10),
+        legend.text=element_text(size=10),
+        legend.title=element_text(size=10))
+
+FIG_S6C<-ggplot(data=ex2_dataFULL, aes(x=as.factor(`Hour`), y=`plost`,fill=`Treatment`) )
+
+FIG_S6C+
+  geom_boxplot(outlier.size = .7, lwd=.3)+
+  labs(title="Supplemental Figure 6C\nPlasmid loss over time\nfly feeding conditions",
+       x="hour",
+       y= "proportion of colonies\nplasmid lost")+
+  geom_point(position=position_jitterdodge(jitter.width=0, dodge.width = .7, seed = 1234), size = 2,shape=16, alpha = .6, aes(color=Treatment))+
+  scale_fill_manual(name="Genotype", values = c("gray","gray","gray", "gray"), guide="none")+
+  scale_color_discrete(name="Treatment", breaks=c("G090AMP","G090STANDARD","G130AMP", "G130STANDARD"), labels=c("wt+AMP","wt","imd+AMP ", "imd"))+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10))
+
+```
+
+#### Figure S7
+
+```{r}
+#count data 
+ex2d_counts<-read.table("Data_table_s16.txt", header = T)
+#flux data 
+ex2d_flux<-read.table("Data_table_s17.txt", header = T)
+
+#process data
+ex2d_gather<-gather(ex2d_flux,"Column", "Flux", C1:C12)
+ex2d_gather$Well_ID<-paste(ex2d_gather$Row, ex2d_gather$Column, sep="_" )
+#assign unique ID to each flux measurement
+ex2d_gather$ID<-paste(ex2d_gather$Well_ID, ex2d_gather$Genotype,ex2d_gather$Condition ,ex2d_gather$Hour, sep="" )
+#foodsig<-ex2d_gather[ex2d_gather$Genotype=="EMPTY",]
+#calculate CFU's perfly 
+ex2d_counts$CFUpFly <-(ex2d_counts$Counts/200)*ex2d_counts$DF*250
+ex2d_counts_filt<-ex2d_counts[complete.cases(ex2d_counts),]
+#assign a unique ID to each CFU measurment that corresponds to each flux measurment
+ex2d_counts_filt$ID<-paste(ex2d_counts_filt$Well_ID, ex2d_counts_filt$Genotype,ex2d_counts_filt$Condition ,ex2d_counts_filt$Hour, sep="" )
+
+#regression
+ex2d_complete<-merge(ex2d_counts_filt, ex2d_gather, by.x=16, by.y=8, all.x=T)
+ex2d_complete<-setDT(ex2d_complete)[,c("Row.y","Hour.y", "Genotype.y", "Column.y"):=NULL]
+ex2d_complete<-ex2d_complete[ex2d_complete$Counts >=30,]
+
+#G130 standard
+ex2d_130<-ex2d_complete[ex2d_complete$Genotype.x=="G130" & ex2d_complete$Condition.x=="STANDARD" ,]
+ex2d_130REG<-lmodel2(log(Flux)~log(CFUpFly) , data=ex2d_130 , nperm = 99)
+reg130<-paste("G130: y=",signif(ex2d_130REG[[3]][3,3],2),"x+",signif(ex2d_130REG[[3]][3,2],2),"CI [",signif(ex2d_130REG[[4]][3,4],2),",",signif(ex2d_130REG[[4]][3,5],2),"]")
+reg130
+#mreglog[[3]][3,2]
+#G130 AMP
+ex2d_130amp<-ex2d_complete[ex2d_complete$Genotype.x=="G130" & ex2d_complete$Condition.x=="AMP" ,]
+ex2d_130REGamp<-lmodel2(log(Flux)~log(CFUpFly) , data=ex2d_130amp , nperm = 99)
+reg130amp<-paste("G130: y=",signif(ex2d_130REGamp[[3]][3,3],2),"x+",signif(ex2d_130REGamp[[3]][3,2],2),"CI[",signif(ex2d_130REGamp[[4]][3,4],2),",",signif(ex2d_130REGamp[[4]][3,5],2) ,"]")
+reg130amp
+#G090 standard
+ex2d_090<-ex2d_complete[ex2d_complete$Genotype.x=="G090" & ex2d_complete$Flux>0,]
+ex2d_090$CFUpFly<-ex2d_090$CFUpFly+1
+ex2d_090REG<-lmodel2(log(Flux)~log(CFUpFly) , data=ex2d_090 , nperm = 99)
+reg090<-paste("G090: y=",signif(ex2d_090REG[[3]][3,3],2),"x+",signif(ex2d_090REG[[3]][3,2],2))
+ex2d_complete$GT<-paste0(ex2d_complete$Genotype.x, ex2d_complete$Condition.x)
+
+fluxcorrected<-ex2d_complete$Flux
+fluxcorrected[fluxcorrected < 0 ]<-1
+ex2d_complete$Flux<-fluxcorrected
+
+FIG_s5<-ggplot(data = ex2d_complete[ex2d_complete$Genotype.x=="G130",], aes(x=`CFUpFly`,y=`Flux`, colour=as.factor(`Hour.x`), shape=`GT`)) 
+# 5 x 3.5
+FIG_s5 +
+  geom_point(size = 5, alpha = .5, position=position_jitter(0.6)) +
+  ylab("flux \n (p/sec)")+
+  xlab("CFUs per fly ")+
+  ggtitle("Supplemental Figure 7 \nimd Total Radiance vs Total CFUs")+
+  scale_y_log10()+
+  scale_x_log10()+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  scale_color_discrete(name="hour")+
+  scale_shape_discrete(name="treatment", breaks=c("G130AMP", "G130STANDARD"), labels=c("imd+AMP", "imd"))+
+  geom_hline(yintercept = 1000, linetype="dashed", color = "red")+
+  theme_bw() + 
+  annotate("text",x=1000000, y=800, label="Background Signal" )+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 12), axis.title.y = element_text(size = 12),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 16),
+        legend.text=element_text(size=10),legend.title=element_text(size=12))
+
+```
+
+
+
+
+## Looking at our ability to track different types for infections
+#### Figure 4b
+
+```{r}
+ex4c_cfu<-read.table("Data_table_s10.txt", header = T)
+ex4c_death<-read.table("Data_table_s11.txt", header = T)
+#reshape it!
+ex4c_cfu<-gather(ex4c_cfu, "FlyID", "radiance", Fly1:Fly12)
+ex4c_death<-gather(ex4c_death, "FlyID", "Death", Fly1:Fly12)
+ex4c_death<-ex4c_death[ex4c_death$Death==T,]
+ex4c_cfu$ID<-paste(ex4c_cfu$Well,ex4c_cfu$FlyID, sep="")
+##give ach fly a unique identifier
+genotypenamer<-function(fulldata){
+  tempgeno<-character()
+  for (i in 1:nrow(fulldata)){
+    if (fulldata[i,c("Well")]=="B"){
+      tempgeno<-append(tempgeno,"G090")
+    } else if (fulldata[i,c("Well")]=="G"){
+      tempgeno<-append(tempgeno,"G130")
+    } else{
+      print("well name error")
+    }
+  }
+  return(tempgeno)
+}
+
+genotype<-genotypenamer(ex4c_cfu)
+ex4c_cfu<-cbind(ex4c_cfu,genotype)
+### label means for each condition
+ex4c_means<-c(mean(ex4c_cfu[ex4c_cfu$genotype=="G090" & ex4c_cfu$Hour==0,c("radiance")]),mean(ex4c_cfu[ex4c_cfu$genotype=="G130" & ex4c_cfu$Hour==0,c("radiance")]))
+# Now we label things
+above_average<-function(fulldata, datameans){
+  above_ave<-character()
+  time0<-fulldata[fulldata$Hour==0,]
+  for ( i in 1:nrow(time0)){
+  if (time0[i,c("genotype")]=="G090"){
+    if (time0[i,c("radiance")]>= datameans[1]){
+      above_ave<-append(above_ave,time0[i,c("ID")])
+    } else{
+      next
+    }
+  } else {
+    if (time0[i,c("radiance")]> datameans[2]){
+      above_ave<-append(above_ave,time0[i,c("ID")])
+    } else{
+      next
+    }
+  }
+  }
+  aalabs<-fulldata$ID %in% above_ave
+  return(aalabs)
+}
+
+
+above_ave<-above_average(ex4c_cfu,ex4c_means)
+ex4c_cfu<-cbind(ex4c_cfu, above_ave)
+##
+deathdefiner<-function(fulldata,deaths){
+  tempdeath<-logical(length=nrow(fulldata))
+  fulldata$Well<-as.character(fulldata$Well)
+  for (i in 1:nrow(deaths)){
+    s_death<-deaths[i,]
+    s_death$Well<-as.character(s_death$Well)
+    temprownum<-rownames(fulldata[fulldata$Hour==s_death[1,c("Hour")] & fulldata$Well == s_death[1,c("Well")] & fulldata$FlyID== s_death[1,c("FlyID")],])
+    #print(temprownum)
+    tempdeath[as.numeric(temprownum)]<-TRUE
+  }
+  return(tempdeath)
+}
+
+
+death<-deathdefiner(ex4c_cfu,ex4c_death)
+ex4c_cfu<-cbind(ex4c_cfu,death)
+
+dcensor<-ex4c_cfu[ex4c_cfu$Hour==0 & ex4c_cfu$radiance <10000000,c("ID")]
+ex4c_cfu_re<-ex4c_cfu[ex4c_cfu$ID==dcensor,]
+ex4c_cfu<-ex4c_cfu[ex4c_cfu$ID!=dcensor,]
+#function to perform a Ttest between 2 genotypes for n hours 
+runningt<-function(data,genocol,sepcol){
+  temp_hours<-unique(data[,sepcol])
+  temp_geno<-unique(data[,genocol])
+  temp_p<-numeric()
+  for ( i in 1:length(temp_hours)){
+    temp_gh1<-data[data$genotype==temp_geno[1] & data$Hour==temp_hours[i],]
+    temp_gh2<-data[data$genotype==temp_geno[2] & data$Hour==temp_hours[i],]
+    temptest<-t.test(temp_gh1$radiance, temp_gh2$radiance)
+    temp_p<-append(temp_p,temptest$p.value)
+  }
+  p_out<-cbind(temp_hours,temp_p)
+  return(p_out)
+}
+
+test_out<-runningt(ex4c_cfu,"genotype","Hour")
+fig4b<-merge(ex4c_cfu, test_out, by.x=3, by.y=1 )
+
+fig4b$radiance[fig4b$radiance<=0]<-1
+
+hsub<-c(0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0)
+fig4bv1<-fig4b[fig4b$Hour %in% hsub,]
+dcensor<-rownames(fig4bv1[fig4bv1$Hour==0 & fig4bv1$radiance <10000000,])
+
+FIG4B<-ggplot(data=fig4bv1, aes(x=as.factor(`Hour`), y=`radiance`,fill=`genotype`) )
+
+FIG4B+
+  geom_boxplot(outlier.size = .7, lwd=.3)+
+  ggtitle("Figure 4B")+
+  ylab("total flux\n (p/s)")+
+  xlab("Hour")+
+  #scale_shape_manual(values = c(16,13))+
+  scale_fill_manual(name="Genotype", values = c("gray","gray40"))+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.6), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10, angle = 45), 
+        axis.text.y = element_text(size= 10))
+
+
+
+```
+#### Figure 4C
+```{r}
+# get first death from death data:
+ex4c_firstdeath<-data.frame(matrix(nrow = 0, ncol=length(ex4c_death)))
+colnames(ex4c_firstdeath)<-colnames(ex4c_death)
+for ( i in 1:length(unique(ex4c_death$FlyID))){
+  temp_ids<-unique(ex4c_death$FlyID)
+  temprows<-ex4c_death[ex4c_death$FlyID==temp_ids[i],]
+  ex4c_firstdeath<-rbind(ex4c_firstdeath,temprows[1,])
+}
+
+ex4c_firstdeath$ID<-paste(ex4c_firstdeath$Well, ex4c_firstdeath$FlyID, sep="")
+
+firstdeath<-logical()
+for ( i in 1:nrow(ex4c_cfu)){
+  temp_ID<-ex4c_cfu[i,c("ID")]
+  temp_hour<- ex4c_cfu[i,c("Hour")]
+  if( nrow(ex4c_firstdeath[ex4c_firstdeath$ID==temp_ID & ex4c_firstdeath$Hour==temp_hour,])==0){
+    firstdeath<-append(firstdeath,FALSE)
+  } else if(nrow(ex4c_firstdeath[ex4c_firstdeath$ID==temp_ID & ex4c_firstdeath$Hour==temp_hour,])!=0){
+    firstdeath<-append(firstdeath,TRUE)
+  }
+  
+  rm(temp_ID,temp_hour)
+}
+sum(firstdeath)
+ex4c_cfu<-cbind(ex4c_cfu, firstdeath)
+
+death_mean<-mean(ex4c_cfu[ex4c_cfu$death==TRUE & ex4c_cfu$firstdeath==TRUE,c("radiance")])
+
+fig4c<-rbind(ex4c_cfu[ex4c_cfu$death==FALSE & ex4c_cfu$firstdeath==FALSE,], ex4c_cfu[ex4c_cfu$death==TRUE & ex4c_cfu$firstdeath==TRUE,])
+ex4c_cfu_ref<-ex4c_cfu_re[1:17,]
+firstdeaths<-fig4c[fig4c$firstdeath==T,]
+##facet labels:
+
+
+FIG4c<-ggplot(data = fig4c, aes(x=`Hour`,y=`radiance`, group=`ID`, color=`death`, shape=`death`))
+# save 8x4
+FIG4c +
+  geom_hline(yintercept = death_mean, color = "red")+
+  geom_point(size = 2, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("Hour")+
+  ggtitle("Figure 4C ")+
+  geom_path()+
+  scale_color_manual(name="Death" ,values = c("FALSE"="gray20", "TRUE"="red","grey"="grey60"))+
+  facet_grid(. ~ genotype)+
+  stat_smooth(aes(group = 1), color="royalblue",linetype="dashed")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  geom_point(size = 2, alpha = 0,data = ex4c_cfu_ref, aes(y=`radiance`,x=`Hour`, color="grey"))+
+  geom_point(size = 2, alpha = .5, data= firstdeaths, aes(y=`radiance`,x=`Hour`), color = "red")+
+geom_path(data = ex4c_cfu_ref, aes(y=`radiance`,x=`Hour`, color="grey")) + 
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10))
+```
+
+#### Figure 4d
+```{r}
+fig4d<-fig4c[fig4c$firstdeath==T,]
+FIG4D<-ggplot(fig4d, aes(y=`radiance`))
+#save 3x4 reduce width in graphic software
+FIG4D +
+  geom_histogram(fill='red')+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log', limits = c(1000000,100000000))+
+  theme_bw()+
+  ggtitle("Figure 4d")+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10), panel.grid.minor = element_blank())
+
+
+```
+
+#### Figure S8
+
+```{r}
+
+ex4c_g90_h0<-ex4c_cfu[ex4c_cfu$genotype=="G090" & ex4c_cfu$Hour==0,]
+ex4c_g90_h115<-ex4c_cfu[ex4c_cfu$genotype=="G090" & ex4c_cfu$Hour==11.5,c("radiance","ID")]
+colnames(ex4c_g90_h115)[1]<-"radiance11.5"
+ex4c_g90_h0<-merge( ex4c_g90_h0, ex4c_g90_h115, by.x=7, by.y= 2)
+ex4c_g90_h0test<-cor.test(ex4c_g90_h0$radiance, ex4c_g90_h0$radiance11.5)
+
+FIGS8a <-ggplot(data = ex4c_g90_h0, aes(x=`radiance11.5`,y=`radiance`))
+
+FIGS8a +
+  geom_point()+
+  ylab("initial fLux (p/s)")+
+  xlab("final flux (p/s")+
+  annotate("text", y=9990000, x=50000000,label=paste("Pearson's product-moment\n correlation\nR=",signif(ex4c_g90_h0test$estimate,2),"\np=",signif(ex4c_g90_h0test$p.value,2) ,"\n CI=",signif(ex4c_g90_h0test$conf.int[1],2),",",signif(ex4c_g90_h0test$conf.int[2],2) ),size=3)+
+  #annotate("text", x="G130", y=60000000,label=paste("n.s."),size=3)+
+  ggtitle("Supplemental Figure 8a\nWT initial vs final dose ")+
+  scale_y_continuous(breaks= ax_breaks, labels=ax_labeles, trans='log',limits=c(100000,100000000))+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits= c(100000,100000000))+
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10))
+
+##g130
+ex4c_g130_h0<-ex4c_cfu[ex4c_cfu$genotype=="G130" & ex4c_cfu$Hour==0,]
+ex4c_g130_death<-ex4c_cfu[ex4c_cfu$genotype=="G130" & ex4c_cfu$firstdeath==T ,c("radiance","ID")]
+colnames(ex4c_g130_death)[1]<-"radiancedeath"
+ex4c_g130_h0<-merge( ex4c_g130_h0, ex4c_g130_death, by.x=7, by.y= 2)
+ex4c_g130_h0test<-cor.test(ex4c_g130_h0$radiance, ex4c_g130_h0$radiancedeath)
+
+FIGS8b <-ggplot(data = ex4c_g130_h0, aes(x=`radiancedeath`,y=`radiance`))
+
+FIGS8b +
+  geom_point()+
+  ylab("initial fLux (p/s)")+
+  xlab("flux at death (p/s")+
+  annotate("text", y=70000000, x=15000000,label=paste("Pearson's product-moment\n correlation\nR=",signif(ex4c_g130_h0test$estimate,2),"\np=",signif(ex4c_g130_h0test$p.value,2) ,"\n CI=",signif(ex4c_g130_h0test$conf.int[1],2),",",signif(ex4c_g130_h0test$conf.int[2],2) ),size=3)+
+  ggtitle("Supplemental Figure 8b\nimd10191 initial vs final dose ")+
+  scale_y_continuous(breaks= ax_breaks, labels=ax_labeles, trans='log',limits=c(10000000,100000000))+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits= c(10000000,100000000))+
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10))
+
+## g130 timer after crossing threshhold
+###function assumes firstdeath (function deathlabeler) and radiancedeath is already 
+threshcross<-function(g130data, deathmeanflux){
+  tempIDs<-unique(g130data$ID)
+  outnum<-as.character()
+  #colnames(outdf)<-colnames(g130data)
+  for ( i in 1:length(tempIDs)){
+    temp_fly<-tempIDs[i]
+    temp_data<-g130data[g130data$ID==temp_fly,]
+    temp_thresh<-temp_data[temp_data$radiance >= deathmeanflux,]
+    if (nrow(temp_thresh)==0 ){
+      next()
+    } else{
+      firstthresh<-rownames(temp_thresh[1,])
+      outnum<-append(outnum,firstthresh)
+    }
+  }
+  outnumlab<-rownames(g130data) %in% outnum
+  return(outnumlab)
+}
+
+ex4c_g130<-ex4c_cfu[ex4c_cfu$genotype=="G130",]
+#sd(ex4c_cfu[ex4c_cfu$death==TRUE & ex4c_cfu$firstdeath==TRUE,c("radiance")])
+ex4c_g130$cross<-threshcross(ex4c_g130, (death_mean-7334353))
+##assumes threshcross has been calculated
+
+g130datathresh<-ex4c_g130
+###
+thresh2death<-function(g130datathresh){
+  tempIDs<-unique(g130datathresh$ID)
+  outdf<-g130datathresh[g130datathresh$Hour==0,]
+  outtime<-as.numeric()
+  #colnames(outdf)<-colnames(g130data)
+  for ( i in 1:length(tempIDs)){
+    temp_fly<-tempIDs[i]
+    temp_data<-g130datathresh[g130datathresh$ID==temp_fly,]
+    temp_time<-temp_data[temp_data$cross==T | temp_data$firstdeath==T,]
+    if (nrow(temp_time)==1 ){
+      outtime<-append(outtime,.1)
+    } else{
+      temp_length<-temp_data[temp_data$firstdeath==T,c("Hour")]-temp_data[temp_data$cross==T,c("Hour")]
+      outtime<-append(outtime,temp_length)
+    }
+  }
+  outdf<-cbind(outdf,outtime)
+  return(outdf)
+}
+
+ex4c_g130_time<-thresh2death(ex4c_g130)
+ex4c_g130_timetest<-cor.test(ex4c_g130_time$radiance, ex4c_g130_time$outtime)
+
+FIGS8c <-ggplot(data = ex4c_g130_time, aes(y=`radiance`,x=`outtime`))
+
+FIGS8c +
+  geom_point()+
+  ylab("initial fLux (p/s)")+
+  xlab("time to death after hitting threshhold")+
+  annotate("text", y=70000000, x=6.9,label=paste("Pearson's product-moment\n correlation\nR=",signif(ex4c_g130_timetest$estimate,2),"\np=",signif(ex4c_g130_timetest$p.value,2) ,"\n CI=",signif(ex4c_g130_timetest$conf.int[1], 2) ,",",signif(ex4c_g130_timetest$conf.int[2],2) ),size=3)+
+  ggtitle("Supplemental Figure 8c\nimd10191 initial flux vs time to death ")+
+  scale_y_continuous(breaks= ax_breaks, labels=ax_labeles, trans='log',limits=c(10000000,100000000))+
+  #$scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits= c(10000000,100000000))+
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10))
+
+```
+
+#### Figure 5b
+
+```{r}
+
+ex4e_cfu<-read.table("Data_table_s12.txt", header = T)
+
+ex4e_diss<-ex4e_cfu # this will be important later
+ex4e_death<-read.table("Data_table_s13.txt", header = T)
+#Reshapeit!
+
+ex4e_cfu<-gather(ex4e_cfu, "FlyID", "radiance", Fly01:Fly12)
+ex4e_death<-gather(ex4e_death, "FlyID", "Death", Fly01:Fly12)
+ex4e_death<-ex4e_death[complete.cases(ex4e_death),]
+ex4e_death<-ex4e_death[ex4e_death$Death ==T,]
+##remove NA
+
+ex4e_cfu$ID<-paste(ex4e_cfu$Well,ex4e_cfu$FlyID, sep="")
+ex4e_death$ID<-paste(ex4e_death$Well,ex4e_death$FlyID, sep="")
+
+
+ex4e_means<-c(mean(ex4e_cfu[ex4e_cfu$genotype=="G090" & ex4e_cfu$Hour==0,c("radiance")]), mean(ex4e_cfu[ex4e_cfu$genotype=="G130" & ex4e_cfu$Hour==0,c("radiance")]))
+above_ave<-above_average(ex4e_cfu,ex4e_means)
+ex4e_cfu<-cbind(ex4e_cfu, above_ave)
+
+#function to take the death data of ex4e and label all deaths 
+
+deathlabeler<-function(fulldata,deaths){
+  tempIDs<-unique(fulldata$ID)
+  outdf<-data.frame(matrix(ncol = 10, nrow = 0))
+  colnames(outdf)<-c("Well","OD","Dose","genotype","Hour","FlyID","radiance","ID","above_ave","Death")
+  for ( i in 1:length(tempIDs)){
+    temp_fly<-tempIDs[i]
+    temp_data<-fulldata[fulldata$ID==temp_fly,]
+    tempdeath<-deaths[deaths$ID==temp_fly,]
+    if (nrow(tempdeath)==0 ){
+      temp_data$Death<-FALSE
+      outdf<-rbind(outdf,temp_data)
+    } else{
+      firstdeath<-tempdeath[1,]
+      #pull out the rownumber of the first death
+      deathrow<-which(rownames(temp_data) == rownames(temp_data[temp_data$Hour==firstdeath$Hour,]),)
+      Death<-append(rep(FALSE, deathrow-1),rep(TRUE, (nrow(temp_data)-(deathrow-1))))
+      temp_data<-cbind(temp_data,Death)
+      outdf<-rbind(outdf,temp_data)
+    }
+  }
+  return(outdf)
+}
+ex4e_labled<-deathlabeler(ex4e_cfu,ex4e_death)
+
+fig5b<-ex4e_labled[ex4e_labled$Hour<=48,]
+fig5b$radiance[fig5b$radiance<=0]<-1
+
+d2int<-fig5b[fig5b$radiance<=1000,]
+
+interpolate_data<-function(fulldata){
+  full_data<-fulldata
+  temp_i<-full_data[full_data$radiance<1000,]
+  temp_i<-arrange(temp_i, ID)
+  for( i in 1:nrow(temp_i)){
+    if (temp_i[i,c("Hour")]<48){
+      temphour<-temp_i[i,c("Hour")]
+      tempid<-temp_i[i,c("ID")]
+      temp_upper<-full_data[full_data$Hour==(temphour-1) & full_data$ID==tempid ,c("radiance")]
+      temp_lower<-full_data[full_data$Hour==(temphour+1) & full_data$ID==tempid, c("radiance")]
+      if (temp_lower<1000 & temphour+1 != 48){
+        temp_lower<-full_data[full_data$Hour==(temphour+2) & full_data$ID==tempid, c("radiance")]
+        temp_inter<-((temp_upper-temp_lower)/2)+temp_lower
+      } else if (temp_lower<1000 & temphour+1 == 48){
+        temp_upper<-full_data[full_data$Hour==(temphour-2) & full_data$ID==tempid ,c("radiance")]
+        temp_lower<-full_data[full_data$Hour==(temphour-1) & full_data$ID==tempid, c("radiance")]
+        temp_inter<-temp_lower-(temp_upper-temp_lower)
+        if ( temp_inter <1000){
+          temp_inter<-temp_lower
+        }
+      } else{
+        temp_inter<-((temp_upper-temp_lower)/2)+temp_lower
+      }
+      full_data[full_data$Hour==temphour & full_data$ID==tempid,c("radiance")]<-temp_inter
+    } else if (temp_i[i,c("Hour")]==48){
+        temphour<-temp_i[i,c("Hour")]
+        tempid<-temp_i[i,c("ID")]
+        temp_upper<-full_data[full_data$Hour==(temphour-2) & full_data$ID==tempid ,c("radiance")]
+        temp_lower<-full_data[full_data$Hour==(temphour-1) & full_data$ID==tempid, c("radiance")]
+        temp_inter<-temp_lower-(temp_upper-temp_lower)
+        if ( temp_inter < 0){
+          temp_inter<-temp_lower
+        }
+        full_data[full_data$Hour==temphour & full_data$ID==tempid,c("radiance")]<-temp_inter
+        paste("printing else ",i," ",tempid)
+    } 
+  }
+  return(full_data)
+}
+
+fig5b<-interpolate_data(fig5b)
+
+fig5c<-fig5b #this will be important later
+
+#test_out<-runningt(fig5b,"genotype","Hour")
+#fig5b<-merge(fig5b,test_out, by.x=5, by.y=1)
+
+
+hsub<-c(0,3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48)
+fig5b<-fig5b[fig5b$Hour %in% hsub,]
+
+#test<-ex4e_labled[ex4e_labled$Hour==0,]
+#test2<-fig5b[fig5b$Hour==0,]
+
+fig5b<-fig5b[fig5b$Death==F,]
+
+tempdata<-fig5b[fig5b$Hour<48,]
+temptest_out<-runningt(tempdata,"genotype","Hour")
+temp36<-fig5b[fig5b$Hour==36,]
+t.test(temp36[temp36$genotype=="G130",c("radiance")],temp36[temp36$genotype=="G090",c("radiance")] )
+
+FIG5B<-ggplot(data=fig5b, aes(x=as.factor(`Hour`), y=`radiance`,fill=`genotype`) )
+##export 6.8x3.5
+FIG5B+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_boxplot(outlier.size = .7, lwd=.3)+
+  #geom_col(position="dodge")+
+  ggtitle("Figure 5B")+
+  ylab("total flux\n (p/s)")+
+  xlab("Hour")+
+  #scale_shape_manual(values = c(16,13))+
+  scale_fill_manual(name="Genotype", values = c("gray","gray20"))+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  #geom_hline(yintercept = 1000, linetype="dashed", color = "grey20")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.6), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10))
+
+```
+
+#### Figure 6a
+```{r}
+
+fig7a<-fig5c ## this will be important later.
+fig5e<-ex4e_cfu
+
+justdeath<-data.frame(matrix(nrow = 0, ncol = length(fig5e)))
+colnames(justdeath)<-colnames(fig5e)
+for ( i in 1:nrow(ex4e_death)){
+  tempdeath <-ex4e_death[i,]
+  temp_row<-fig5e[fig5e$ID==tempdeath$ID & fig5e$Hour == tempdeath$Hour,]
+  justdeath<-rbind(justdeath,temp_row)
+  rm(tempdeath,temp_row)
+}
+mean_rud<-mean(justdeath$radiance)
+## censor deaths 
+firstdeath<-logical()
+for ( i in 1:nrow(fig5c)){
+  temp_ID<-fig5c[i,c("ID")]
+  temp_hour<- fig5c[i,c("Hour")]
+  if(nrow(ex4e_death[ex4e_death$ID==temp_ID & ex4e_death$Hour==temp_hour,])==0 ){
+    firstdeath<-append(firstdeath,FALSE)
+  } else if(nrow(ex4e_death[ex4e_death$ID==temp_ID & ex4e_death$Hour==temp_hour,])>0 ){
+    firstdeath<-append(firstdeath,TRUE)
+  }
+  
+  rm(temp_ID,temp_hour)
+}
+
+
+fig5c<-cbind(fig5c,firstdeath)
+fig5c<-fig5c[fig5c$genotype=="G130",]
+
+live<-fig5c[ fig5c$Death == FALSE & fig5c$firstdeath == FALSE,]
+fd<-fig5c[ fig5c$Death == TRUE & fig5c$firstdeath == TRUE,]
+alld<-fig5c[ fig5c$Death == TRUE,]
+fig5c<-rbind(fig5c[ fig5c$Death == FALSE & fig5c$firstdeath == FALSE,],
+                fig5c[ fig5c$Death == TRUE & fig5c$firstdeath == TRUE,])
+f6a_firstdeaths<-fig5c[fig5c$firstdeath==T,]
+
+FIG5C <-ggplot(data = fig5c, aes(x=`Hour`,y=`radiance`, group=`ID`, shape=`Death`,color=`Death`))
+#export 5x3
+FIG5C+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_hline(yintercept = mean_rud, color = "red")+
+  geom_point(size = 2, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("hour")+
+  #scale_shape_manual(values = c(16,13))+
+  scale_color_manual(name="Death" ,values = c("FALSE"="gray20", "TRUE"="gray20"))+
+  ggtitle("Figure 6a ")+
+  geom_path()+
+  facet_grid(. ~ genotype)+
+  stat_smooth(aes(group = 1), color="royalblue",linetype="dashed")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  #geom_hline(yintercept = 1000, linetype="dashed", color = "red")+
+  geom_point(size = 2, alpha = .5, data= f6a_firstdeaths, aes(y=`radiance`,x=`Hour`), color = "red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10))
+```
+
+#### figure s10
+
+```{r}
+##function to format object for diss
+diss_shape<-function(fulldata,groupcol,rownum){
+  groups<-unique(fulldata[,groupcol])
+  temp_df<-data.frame(nrow=rownum)
+  for (i in 1:length(groups)){
+    ##Select a group
+    temp_g<-groups[i]
+    ##Pull out the group from DF
+    temp_data<-fulldata[fulldata[,groupcol]==temp_g ,]
+    ##remove group column
+    temp_data<-temp_data[,!colnames(temp_data)%in% groupcol]
+    ##rename Rows
+    rownames(temp_data)<-temp_data$Hour
+    temp_data$Hour<-NULL
+    #rename columns
+    temp_names<-paste(as.character(temp_g),colnames(temp_data), sep = "_")
+    colnames(temp_data)<-temp_names
+    temp_df<-cbind(temp_df,temp_data)
+  }
+  temp_df$nrow<-NULL
+  return(temp_df)
+}
+ex4e_diss$OD<-NULL
+ex4e_diss$Dose<-NULL
+ex4e_130<-ex4e_diss[ex4e_diss$genotype=="G130",]
+ex4e_130$genotype <-NULL
+
+ex4e_130<-diss_shape(ex4e_130, "Well",54)
+ex4e_130[ex4e_130<=0]<-1
+ex4e_130<-log(ex4e_130)
+
+ex4e_130<-ex4e_130[1:49,]
+euc130<-diss(ex4e_130, "EUCL")
+plot(hclust(euc130), main = "Suppplemental Figure 10\nimd10191 Cluster Dendogram")
+
+```
+
+#### Figure 6aii
+
+```{r}
+c1_130<-c("EFly08","GFly01","GFly08")
+c2_130<-c("GFly10","HFly10","EFly10","FFly10","HFly08","GFly04","FFly03","HFly06","GFly05","GFly07","HFly12","GFly02","HFly11","GFly03","GFly12","FFly07","HFly02","HFly03","FFly09","EFly02","HFly07","FFly12","GFly11","EFly06","GFly09","EFly04","EFly12","EFly01","GFly06")
+c3_130<-c("FFly02","HFly04","FFly06","FFly04","FFly08","HFly05","EFly03","EFly09","FFly01","EFly11","FFly11","EFly05","EFly07")
+c4_130<-c("FFly05","HFly01","HFly09")
+
+ex4e_130_re<-rbind(live,alld)
+
+clustlabs<-as.character()
+for( i in 1:nrow(ex4e_130_re)){
+  temprow<-ex4e_130_re[i,]
+  if (temprow$ID %in% c1_130 ){
+    clustlabs<-append(clustlabs,"C1")
+  } else  if (temprow$ID %in% c2_130){
+    clustlabs<-append(clustlabs,"C2")
+  } else  if (temprow$ID %in% c3_130){
+    clustlabs<-append(clustlabs,"C3")
+  } else  if (temprow$ID %in% c4_130){
+    clustlabs<-append(clustlabs,"C4")
+  }
+}
+
+ex4e_130_re<-cbind(ex4e_130_re,clustlabs)
+
+ex4e_130_death<-ex4e_130_re[ex4e_130_re$Death==T,]
+ex4e_130_re<-ex4e_130_re[ex4e_130_re$Death==F | ex4e_130_re$firstdeath==T,]
+#g130 Plot
+
+#ex4e_130_re$radiance[ex4e_130_re$radiance<=0]<-1
+colors_cb<-c("#D81B60","#1E88E5","#FFC107","#004D40")
+
+FIG6Ab<-ggplot(f6a_firstdeaths, aes(y=`radiance`))
+# save 3x3 and manually shrink width in graphical program
+FIG6Ab +
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_histogram(fill='red')+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log', limits = c(1000,100000000))+
+  theme_bw()+
+  ggtitle("Figure 6A-ii")+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10), panel.grid.minor = element_blank())
+```
+
+
+#### Figure 6b 
+
+```{r}
+FIG6B<-ggplot(data=ex4e_130_re, aes(x= `Hour`, y=`radiance`, color=`clustlabs`, group=`ID`, shape=`Death`))
+#save 4.5 x 3 + manually Move legends
+FIG6B+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 1, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("Hour")+
+  #scale_shape_manual(values = c(16,13))+
+  ggtitle("Figure 6B")+
+  geom_path()+
+  scale_color_manual(name="clustlabs" ,values = colors_cb)+
+  theme_bw()+
+  facet_wrap(. ~ clustlabs)+
+  #stat_smooth(aes(group = 1), color="black",linetype="dashed")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  geom_point(size = 2, alpha = .5, data= f6a_firstdeaths, aes(y=`radiance`,x=`Hour`), color = "red")+
+  geom_path(data=ex4e_130_death, aes(x=`Hour`, y=`radiance`, color=`clustlabs`,group=`ID`),linetype='dashed')+
+  #geom_hline(yintercept = 1000, linetype="dashed", color = "red")+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10))
+
+
+
+```
+
+#### Figure S9
+
+```{r}
+ex4e_g130_h0<-ex4e_130_re[ex4e_130_re$genotype=="G130" & ex4e_130_re$Hour==0,]
+ex4e_g130_death<-ex4e_130_re[ex4e_130_re$genotype=="G130" & ex4e_130_re$firstdeath==T ,c("radiance","ID")]
+colnames(ex4e_g130_death)[1]<-"radiancedeath"
+ex4e_g130_h0<-merge( ex4e_g130_h0, ex4e_g130_death, by.x=8, by.y= 2)
+ex4e_g130_h0test<-cor.test(ex4e_g130_h0$radiance, ex4e_g130_h0$radiancedeath)
+
+FIGS9a <-ggplot(data = ex4e_g130_h0, aes(x=`radiancedeath`,y=`radiance`))
+
+FIGS9a +
+  geom_point()+
+  ylab("initial fLux (p/s)")+
+  xlab("flux at death (p/s)")+
+  annotate("text", y=600000, x=3000000,label=paste("Pearson's product-moment\n correlation\nR=",signif(ex4e_g130_h0test$estimate,2),"\np=",signif(ex4e_g130_h0test$p.value,2) ,"\n CI=",signif(ex4e_g130_h0test$conf.int[1],2),",",signif(ex4e_g130_h0test$conf.int[2],2) ),size=3)+
+  #annotate("text", x="G130", y=60000000,label=paste("n.s."),size=3)+
+  ggtitle("Supplemental Figure 9a\nimd10191 initial vs final dose ")+
+  scale_y_continuous(breaks= ax_breaks, labels=ax_labeles, trans='log',limits=c(10000,1000000))+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits= c(1000000,100000000))+
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10), panel.grid.minor = element_blank())
+
+ex4e_g90_h0<-fig7a[fig7a$genotype=="G090" & fig7a$Hour==0,]
+ex4e_g90_h48<-fig7a[fig7a$genotype=="G090" & fig7a$Hour==48,]
+ex4e_g90_h48<-ex4e_g90_h48[,c("radiance","ID")]
+colnames(ex4e_g90_h48)[1]<-"final_rad"
+ex4e_g090_if<-merge( ex4e_g90_h0, ex4e_g90_h48, by.x=8, by.y= 2)
+ex4e_g090_ifTEST<-cor.test(ex4e_g090_if$radiance, ex4e_g090_if$final_rad)
+
+FIGS9b <-ggplot(data = ex4e_g090_if, aes(x=`final_rad`,y=`radiance`))
+
+FIGS9b +
+  geom_point()+
+  ylab("initial fLux (p/s)")+
+  xlab("final flux (p/s)")+
+  annotate("text", y=400000, x=55000,label=paste("Pearson's product-moment\n correlation\nR=",signif(ex4e_g090_ifTEST$estimate,2),"\np=",signif(ex4e_g090_ifTEST$p.value,2) ,"\n CI=",signif(ex4e_g090_ifTEST$conf.int[1],2),",",signif(ex4e_g090_ifTEST$conf.int[2],2) ),size=3)+
+  #annotate("text", x="G130", y=60000000,label=paste("n.s."),size=3)+
+  ggtitle("Supplemental Figure 9b\n WT initial vs final dose ")+
+  scale_y_continuous(breaks= ax_breaks, labels=ax_labeles, trans='log',limits= c(10000,1000000))+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits= c(1000,100000))+
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10), panel.grid.minor = element_blank())
+
+
+```
+
+####Figure S11
+
+```{r}
+nrow(ex4e_130_re[ex4e_130_re$Hour==0 & ex4e_130_re$clustlabs=="C1" ,])
+nrow(ex4e_130_re[ex4e_130_re$Hour==0 & ex4e_130_re$clustlabs=="C2" ,])
+nrow(ex4e_130_re[ex4e_130_re$Hour==0 & ex4e_130_re$clustlabs=="C3" ,])
+nrow(ex4e_130_re[ex4e_130_re$Hour==0 & ex4e_130_re$clustlabs=="C4" ,])
+
+tdeath<-ex4e_130_re[ex4e_130_re$firstdeath==T,]
+tdeath<-tdeath[! rownames(tdeath) %in% c(1959,2392,2823),]
+tc1<-tdeath[tdeath$clustlabs=="C1",]
+tc2<-tdeath[tdeath$clustlabs=="C2",]
+tc3<-tdeath[tdeath$clustlabs=="C3",]
+tc4<-tdeath[tdeath$clustlabs=="C4",]
+
+t.test(tc1$Hour,tc2$Hour)
+t.test(tc1$Hour,tc3$Hour)
+t.test(tc1$Hour,tc4$Hour)
+t.test(tc2$Hour,tc3$Hour)
+t.test(tc2$Hour,tc4$Hour)
+t.test(tc3$Hour,tc4$Hour)
+
+figs11<-rbind(tc1,tc2,tc3,tc4)
+
+FIGS11 <-ggplot(data = figs11, aes(x=`clustlabs`,y=`Hour`))
+
+FIGS11 +
+  geom_boxplot()+
+  #geom_point(size=2, alpha=.5, color = "blue" )+
+  geom_jitter(width = .2, height = 0, color = "blue",size=2, alpha=.5)+
+  ylab("hour of death")+
+  xlab("cluster")+
+  ggtitle("Supplemental Figure 11")+
+  ylim(20,50)+
+  theme_bw()+
+  scale_fill_discrete("Above Average\nInitial Injection")
+
+```
+```{r}
+tdeath$count<-1
+FIG5C<-ggplot(data = tdeath, aes(x=as.factor(`Hour`)))
+
+FIG5C + 
+  geom_bar()+
+  xlab("time of death\n(hour)")+
+  ggtitle("Figure 5C")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10),
+        panel.grid = element_blank())
+
+```
+## Srikis code 
+
+```{r}
+#Gonna go with spearman correltions because they with with both liniear and mopnotonic stuff.
+inscorr<-read.csv("Data_table_14.csv", header = T)
+
+tde24<-ex4e_130_re[ex4e_130_re$firstdeath==T & ex4e_130_re$Hour==24,c("ID")]
+tde28<-ex4e_130_re[ex4e_130_re$firstdeath==T & ex4e_130_re$Hour==28,c("ID")]
+tde32<-ex4e_130_re[ex4e_130_re$firstdeath==T & ex4e_130_re$Hour==32,c("ID")]
+tde48<-ex4e_130_re[ex4e_130_re$firstdeath==T & ex4e_130_re$Hour==48,c("ID")]
+
+tde_labs<-numeric()
+for ( i in 1:nrow(ex4e_130_re)){
+  tempid<-ex4e_130_re[i,c("ID")]
+  if (tempid %in% tde24){
+    tde_labs<-append( tde_labs, 24)
+  } else if (tempid %in% tde28){
+    tde_labs<-append( tde_labs, 28)
+  } else if (tempid %in% tde32){
+    tde_labs<-append( tde_labs, 32)
+  } else if (tempid %in% tde48){
+    tde_labs<-append( tde_labs, 48)
+  }
+}
+
+ex4e_130_re<- cbind(ex4e_130_re, tde_labs )
+
+in_load<-ex4e_130_re[ex4e_130_re$Hour==0,]
+
+FIG_6c<-ggplot( data= in_load, aes( x=as.factor(`tde_labs`), y=`radiance`))
+FIG_6c+
+  geom_boxplot(outlier.size = 0, outlier.stroke = 0)+
+  geom_jitter(width = .2)+
+  theme_bw()+
+  ggtitle("Fig6C")+
+  ylab( "initial flux\n(p/s)")+
+  xlab( "Time of Death (hour)")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log', limits = c(9000,1000000))+
+  annotate("text", x=2, y=900000,label=paste("ρ=-0.29 ,CI:[-0.56,0.00]"),size=3)+
+  theme(plot.title = element_text(hjust = 0.6), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10, angle = 45), 
+        axis.text.y = element_text(size= 10))
+
+h20_load<-ex4e_130_re[ex4e_130_re$Hour==20,]
+FIG_6d<-ggplot( data= h20_load, aes( x=as.factor(`tde_labs`), y=`radiance`))
+FIG_6d+
+  geom_boxplot(outlier.size = 0, outlier.stroke = 0)+
+  geom_jitter(width = .2)+
+  theme_bw()+
+  ggtitle("Fig6d")+
+  ylab( "flux 20h\n(p/s)")+
+  xlab( "time of death (hour)")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log', limits = c(100000,100000000))+
+  annotate("text", x=2, y=90000000,label=paste("ρ=-0.61 ,CI:[-0.78,-0.39]"),size=3)+
+  theme(plot.title = element_text(hjust = 0.6), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10, angle = 45), 
+        axis.text.y = element_text(size= 10))
+
+FIG_6e<-ggplot( data= inscorr, aes( x=as.factor(`upper_TTD`), y=`log10_auc_cfu_20h` ))
+FIG_6e+
+  geom_boxplot(outlier.size = 0, outlier.stroke = 0)+
+  geom_jitter(width = .2)+
+  theme_bw()+
+  ggtitle("Fig6d")+
+  ylim(5,6.75)+
+  ylab( "log(AUC) 20h")+
+  xlab( "time of death (hour)")+
+  annotate("text", x=2, y=6.7,label=paste("ρ=-0.59 ,CI:[-0.75,-0.36]"),size=3)+
+  theme(plot.title = element_text(hjust = 0.6), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10, angle = 45), 
+        axis.text.y = element_text(size= 10))
+
+```
+
+#### Figure 7a
+
+```{r}
+
+fig7a<-fig7a[fig7a$genotype=="G090",]
+#fig7a<-interpolate_data(fig7a)
+
+FIG7a <-ggplot(data = fig7a, aes(x=`Hour`,y=`radiance`, group=`ID`, shape=`Death`,color=`Death`))
+#save 5x3.2
+FIG7a+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 2, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("Hour")+
+  #scale_color_manual(name="Death" ,values = c("FALSE"="#00CCCC", "TRUE"="red"))+
+  ggtitle("Figure 7a ")+
+  geom_path(color="gray20")+
+  facet_grid(. ~ genotype)+
+  stat_smooth(aes(group = 1), color="royalblue",linetype="dashed")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  #geom_hline(yintercept = 1000, linetype="dashed", color = "red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10))
+
+```
+
+####Figure S12
+
+```{r}
+
+ex4e_90<-ex4e_diss[ex4e_diss$genotype=="G090",]
+ex4e_90$genotype <-NULL
+
+ex4e_90<-diss_shape(ex4e_90, "Well",54)
+
+interleaf_data<-function(full_data, interpolated_data,interlist){
+  interpolated_data$nID<-paste0(interpolated_data$Well,"_",interpolated_data$FlyID)
+  interlist$nID<-paste0(interlist$Well,"_",interlist$FlyID)
+  for ( i in 1:nrow(interlist)){
+    temp_id<-interlist[i,c("nID")]
+    temp_hour<-interlist[i,c("Hour")]
+    new_rad<-interpolated_data[interpolated_data$nID==temp_id & interpolated_data$Hour==temp_hour ,c("radiance")]
+    full_data[rownames(full_data) == temp_hour, c(temp_id)]<-new_rad
+  }
+  return(full_data)
+}
+ex4e_90<-interleaf_data(ex4e_90,fig7a,d2int)
+
+ex4e_90<-ex4e_90[1:49,]
+ex4e_90<-log(ex4e_90)
+
+
+###
+
+euc90<-diss(ex4e_90, "EUCL")
+
+plot(hclust(euc90), main = "Suppplemental Figure 12A\nWT Cluster Dendogram")
+
+
+#clust try 1 ( based on tree clusters)
+c1_90<-c("CFly06","CFly07","DFly08","AFly12","DFly11")
+c2_90<-c("AFly03","DFly09","BFly06","CFly05","CFly08","AFly04", "AFly07")
+c3_90<-c("BFly01","CFly12","BFly04","BFly05","CFly04","AFly05","BFly02","BFly10","BFly08","BFly12", "BFly07","DFly10","AFly01","CFly02")
+c4_90<-c("AFly10","DFly01","DFly07","AFly09","DFly05","AFly02","AFly11", "AFly06", "AFly08","BFly03",    "BFly09",  "BFly11",  "CFly01",  "CFly03","CFly09", "CFly10", "CFly11","DFly02", "DFly03", "DFly04",  "DFly06","DFly12")
+
+
+
+ex4e_90_re<-fig7a
+clustlabs<-as.character()
+for( i in 1:nrow(ex4e_90_re)){
+  temprow<-ex4e_90_re[i,]
+  if (temprow$ID %in% c1_90 ){
+    clustlabs<-append(clustlabs,"C1")
+  } else  if (temprow$ID %in% c2_90){
+    clustlabs<-append(clustlabs,"C2")
+  } else  if (temprow$ID %in% c3_90){
+    clustlabs<-append(clustlabs,"C3")
+  }  else  if (temprow$ID %in% c4_90){
+    clustlabs<-append(clustlabs,"C4")
+  } 
+}
+ex4e_90_re<-cbind(ex4e_90_re,clustlabs)
+##g90
+
+FIG_S12B<-ggplot(data=ex4e_90_re, aes(x= `Hour`, y=`radiance`, color=`clustlabs`, group=`ID`))
+FIG_S12B+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 1, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("hour")+
+  ggtitle("Supplemental Figure 12b\n wt unsupervised clustering  ")+
+  geom_path()+
+  scale_color_manual(name="clustlabs" ,values = colors_cb)+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10))
+
+##90 short
+ex4e_90short<-ex4e_90[1:31,]
+euc90short<-diss(ex4e_90short, "EUCL")
+plot(hclust(euc90short), main = "Suppplemental Figure 12C\nWT Cluster Dendogram")
+
+
+c1_90short<-c("BFly07", "DFly07", "DFly02", "DFly12", "BFly01", "CFly12", "AFly05", "CFly04", "BFly02", "BFly08", "BFly10", "BFly04", "BFly12", "BFly09", "BFly05", "CFly02", "AFly01" )
+c2_90short<-c("AFly11", "AFly06", "BFly11", "CFly01", "CFly03", "CFly09", "CFly10", "CFly11", "DFly04", "DFly06", "DFly10", "AFly10", "DFly01",  "AFly09", "DFly05", "AFly02", "CFly07", "CFly06", "BFly03", "DFly03")
+c3_90short<-c("AFly12", "DFly08", "DFly11", "AFly04","AFly07", "AFly08", "BFly06", "CFly05", "DFly09", "AFly03", "CFly08")
+
+ex4e_90_reshort<-fig7a[fig7a$genotype=="G090",]
+clustlabs<-as.character()
+for( i in 1:nrow(ex4e_90_reshort)){
+  temprow<-ex4e_90_reshort[i,]
+  if (temprow$ID %in% c1_90short ){
+    clustlabs<-append(clustlabs,"C1")
+  } else  if (temprow$ID %in% c2_90short){
+    clustlabs<-append(clustlabs,"C2")
+#clusts 3 + 4 only includded in try 1 for this data
+  } else  if (temprow$ID %in% c3_90short){
+    clustlabs<-append(clustlabs,"C3")
+  } 
+}
+ex4e_90_reshort<-cbind(ex4e_90_reshort,clustlabs)
+###
+FIG_S12D<-ggplot(data=ex4e_90_reshort, aes(x= `Hour`, y=`radiance`, color=`clustlabs`, group=`ID`))
+
+FIG_S12D+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 1, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("Hour")+
+  scale_color_manual(name="clustlabs" ,values = colors_cb)+
+  ggtitle("Supplemental Figure 12D\nWT <h30 clustering  ")+
+  geom_path()+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10))
+```
+
+#### Figure 7b
+
+```{r}
+#picked by hand
+
+c1_90hand<-c("AFly02","AFly12","DFly11", "AFly07", "CFly07", "DFly08", "CFly06", "BFly03","AFly04", "DFly03")
+c2_90hand<-c("BFly10","AFly11","BFly05","BFly02","CFly12","AFly01", "AFly06", "AFly08", "BFly07", "BFly08", "BFly09", "BFly11", "BFly12", "CFly01", "CFly03", "CFly05",  "CFly08", "CFly09", "CFly10", "CFly11", "DFly02",  "DFly04", "DFly06",  "DFly09", "DFly10", "DFly12",  "AFly05",   "AFly03", "AFly10", "BFly01", "BFly04", "DFly01", "DFly07", "AFly09", "DFly05", "BFly06","CFly02","CFly04")
+
+ex4e_90_rehand<-fig7a[fig7a$genotype=="G090",]
+clustlabs<-as.character()
+for( i in 1:nrow(ex4e_90_rehand)){
+  temprow<-ex4e_90_rehand[i,]
+  if (temprow$ID %in% c1_90hand ){
+    clustlabs<-append(clustlabs,"C1")
+  } else  if (temprow$ID %in% c2_90hand){
+    clustlabs<-append(clustlabs,"C2")
+  } 
+}
+
+ex4e_90_rehand<-cbind(ex4e_90_rehand,clustlabs)
+
+ex4e_90_rehand$radiance[ex4e_90_rehand$radiance<=0]<-1
+
+FIG7b<-ggplot(data=ex4e_90_rehand, aes(x= `Hour`, y=`radiance`, color=`clustlabs`, group=`ID`))
+#5x3.2
+FIG7b+
+  annotate("rect", xmin = -Inf, xmax =Inf, ymin =0, ymax = 1000, fill = "gray", alpha = .4, color = NA)+
+  geom_point(size = 1, alpha = 0) +
+  ylab("total flux\n (p/s)")+
+  xlab("hour")+
+  ggtitle("Figure 7b")+
+  scale_color_manual(name="clustlabs" ,values = colors_cb)+
+  geom_path()+
+  facet_wrap(. ~ genotype)+
+  stat_smooth(aes(group = 1), color="black",linetype="dashed")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log')+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), axis.text.y = element_text(size= 10))
+```
+
+#### figure S13
+```{r}
+ex4e_g90_h0<-ex4e_90_rehand[ex4e_90_rehand$genotype=="G090" & ex4e_90_rehand$Hour==0,]
+ex4e_g90_h115<-ex4e_90_rehand[ex4e_90_rehand$genotype=="G090" & ex4e_90_rehand$Hour==48,c("radiance","ID")]
+colnames(ex4e_g90_h115)[1]<-"radiance48"
+ex4e_g90_h0<-merge( ex4e_g90_h0, ex4e_g90_h115, by.x=8, by.y= 2)
+ex4e_g90_h0test<-cor.test(ex4e_g90_h0[ex4e_g90_h0$clustlabs=="C1", c("radiance")], ex4e_g90_h0[ex4e_g90_h0$clustlabs=="C1", c("radiance48")])
+ex4e_g90_h0test2<-cor.test(ex4e_g90_h0[ex4e_g90_h0$clustlabs=="C2", c("radiance")], ex4e_g90_h0[ex4e_g90_h0$clustlabs=="C2", c("radiance48")])
+
+FIGS13a <-ggplot(data = ex4e_g90_h0, aes(x=`radiance48`,y=`radiance`, color=`clustlabs`))
+
+FIGS13a +
+  geom_point()+
+  ylab("initial fLux (p/s)")+
+  xlab("final flux (p/s)")+
+  annotate("text", y=20000, x=2000,label=paste("Pearson's product-moment\n correlation (group1)\nR=",signif(ex4e_g90_h0test$estimate,2),"\np=",signif(ex4e_g90_h0test$p.value,2) ,"\n CI=",signif(ex4e_g90_h0test$conf.int[1],2),",",signif(ex4e_g90_h0test$conf.int[2],2) ),size=3)+
+  annotate("text", y=20000, x=50000,label=paste("Pearson's product-moment\n correlation (group2)\nR=",signif(ex4e_g90_h0test2$estimate,2),"\np=",signif(ex4e_g90_h0test2$p.value,2) ,"\n CI=",signif(ex4e_g90_h0test2$conf.int[1],2),",",signif(ex4e_g90_h0test2$conf.int[2],2) ),size=3)+
+  #annotate("text", x="G130", y=60000000,label=paste("n.s."),size=3)+
+  ggtitle("Supplemental Figure 13a ")+
+  scale_y_continuous(breaks= ax_breaks, labels=ax_labeles, trans='log',limits=c(10000,1000000))+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits= c(1000,100000))+
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        axis.text.x = element_text(size= 10), 
+        axis.text.y = element_text(size= 10), panel.grid.minor = element_blank())+
+  scale_color_manual(name="Group" ,values = colors_cb, labels = c("group1", "group2"))
+
+
+ex4e_90_hi<-ex4e_90_rehand[ ex4e_90_rehand$clustlabs=="C1" & ex4e_90_rehand$Hour==0,]
+ex4e_90_lo<-ex4e_90_rehand[ ex4e_90_rehand$clustlabs=="C2" & ex4e_90_rehand$Hour==0,]
+ex4e_90_inittest<-t.test(ex4e_90_hi$radiance, ex4e_90_lo$radiance)
+figs13b<-rbind(ex4e_90_hi, ex4e_90_lo)
+
+FIGS13B <-ggplot(data = figs13b, aes(x=`clustlabs`, y=`radiance`))
+
+FIGS13B +
+  geom_boxplot()+
+  geom_point( alpha=.7, size=2, position = "jitter", color = "blue")+
+  ylab("initial flux (p/s)")+
+  xlab("group")+
+  annotate("text", x=1.5, y=900000,label=paste("n.s p=",signif(ex4e_90_inittest$p.value,2)))+
+  ggtitle("Supplemental Figure 13b")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limit=c(10000,1000000))+
+  theme_bw()
+
+
+ex4e_90c1<-ex4e_90_rehand[ ex4e_90_rehand$clustlabs=="C1" & ex4e_90_rehand$Hour==48,]
+ex4e_90c2<-ex4e_90_rehand[ ex4e_90_rehand$clustlabs=="C2" & ex4e_90_rehand$Hour==48,]
+
+t.test(ex4e_90c1$radiance, ex4e_90c2$radiance)
+
+figs13c<-rbind(ex4e_90c1, ex4e_90c2)
+
+FIGS13C <-ggplot(data = figs13c, aes(x=`clustlabs`, y=`radiance`))
+
+FIGS13C +
+  geom_boxplot()+
+  geom_point( alpha=.7, size=2, position = "jitter", color = "blue")+
+  ylab("final flux (p/s)")+
+  xlab("cluster")+
+  annotate("text", x=1.5, y=100000,label=paste("n.s."))+
+  ggtitle("Supplemental Figure 13c")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans='log',limits=c( 1000,100000))+
+  theme_bw()+
+  scale_fill_discrete("Above Average\nInitial Injection")
+```
+
+#### figure s14
+tecan data
+```{r}
+ivt<-read.table("Data_table_s15.txt", header = T)
+## what is teh background noise?
+tecan_back<-mean(ivt[ivt$Type=="food",c("TECAN")])
+
+flies<-ivt[ivt$Type=="Fly",]
+flies<-flies[complete.cases(flies),]
+
+IVT_plot<-ggplot(data=flies, aes( x = `TECAN`, `IVS`, color=as.factor(`OD`)))
+IVT_plot+
+  geom_point()+
+  ylab("IVIS\n(p/s)")+
+  xlab("TECAN\n(counts/s)")+
+  scale_color_discrete(name="OD",labels=c(expression("6x10"^-5),expression("6x10"^-4),"0.006","0.06","0.6","6" ))+
+  scale_x_continuous(breaks= ax_breaks,labels=ax_labeles,trans="log")+
+  scale_y_continuous(breaks= ax_breaks,labels=ax_labeles,trans="log")+
+  geom_hline(yintercept=1000,linetype="dashed", color = "red")+
+  geom_vline(xintercept=100,linetype="dashed", color = "blue" )
+```
